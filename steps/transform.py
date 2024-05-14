@@ -5,14 +5,74 @@ This module defines the following routines used by the 'transform' step of the r
   to the estimator during model inference.
 """
 
+from pandas import DataFrame
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
+
+
+def calculate_features(df: DataFrame):
+    """
+    Extend the input dataframe with pickup day of week and hour, and trip duration.
+    Drop the now-unneeded pickup datetime and dropoff datetime columns.
+    """
+    #df["tpep_pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"], errors='coerce')
+    #df["tpep_dropoff_datetime"] = pd.to_datetime(df["tpep_dropoff_datetime"], errors='coerce')
+
+    df["pickup_dow"] = df["tpep_pickup_datetime"].dt.dayofweek
+    df["pickup_hour"] = df["tpep_pickup_datetime"].dt.hour
+    trip_duration = df["tpep_dropoff_datetime"] - df["tpep_pickup_datetime"]
+    df["trip_duration"] = trip_duration.map(lambda x: x.total_seconds() / 60)
+    dateTimeColumns = list(df.select_dtypes(include=["datetime64"]).columns)
+    df[dateTimeColumns] = df[dateTimeColumns].astype(str)
+    df.drop(columns=["tpep_pickup_datetime", "tpep_dropoff_datetime"], inplace=True)
+    return df
+
+
 def transformer_fn():
     """
     Returns an *unfitted* transformer that defines ``fit()`` and ``transform()`` methods.
     The transformer's input and output signatures should be compatible with scikit-learn
     transformers.
     """
-    #
-    # FIXME::OPTIONAL: return a scikit-learn-compatible transformer object.
-    #
-    # Identity feature transformation is applied when None is returned.
-    return None
+    import sklearn
+
+    function_transformer_params = (
+        {}
+        if sklearn.__version__.startswith("1.0")
+        else {"feature_names_out": "one-to-one"}
+    )
+
+    return Pipeline(
+        steps=[
+            (
+                "calculate_time_and_duration_features",
+                FunctionTransformer(calculate_features, 
+                ##**function_transformer_params
+                                  ),
+            ),
+            (
+                "encoder",
+                ColumnTransformer(
+                    transformers=[
+                        (
+                            "hour_encoder",
+                            OneHotEncoder(categories="auto", sparse_output=False),
+                            ["pickup_hour"],
+                        ),
+                        (
+                            "day_encoder",
+                            OneHotEncoder(categories="auto", sparse_output=False),
+                            ["pickup_dow"],
+                        ),
+                        (
+                            "std_scaler",
+                            StandardScaler(),
+                            ["trip_distance", "trip_duration"],
+                        ),
+                    ]
+                ),
+            ),
+        ]
+    )
